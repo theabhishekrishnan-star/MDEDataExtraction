@@ -1,6 +1,7 @@
 package com.magizhchi.mdedataextraction.controller;
 
 import java.io.File;
+import java.net.InetAddress;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.FileSystemResource;
@@ -11,15 +12,13 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
-import com.magizhchi.mdedataextraction.model.ExtractionRequest;
 import com.magizhchi.mdedataextraction.service.DataExtraction;
 import com.magizhchi.mdedataextraction.service.DataExtractionFactory;
-import com.magizhchi.mdedataextraction.service.PDFDataExtraction;
 
 @RestController
 @RequestMapping("/api/extract")
@@ -28,29 +27,43 @@ public class DataExtractionController {
     @Autowired
     private DataExtractionFactory factory;
     
-    @PostMapping("/file")
-    public ResponseEntity<String> extractFromFile(@RequestBody ExtractionRequest request) {
-        DataExtraction extractor = factory.getExtractor(request.getFileType());
-        String result = extractor.extract(request.getFilePath(), request.getFileName());
-        
-        return ResponseEntity.ok()
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(result);
-    }
-    
-    @PostMapping("/file/download")
-    public ResponseEntity<String> extractFromFileWithDownload(@RequestBody ExtractionRequest request) {
+    @PostMapping("/upload")
+    public ResponseEntity<String> uploadFile(
+            @RequestParam("file") MultipartFile file, 
+            @RequestParam("fileType") String fileType,
+            @RequestParam(value = "download", defaultValue = "false") boolean download) {
         try {
-            if ("pdf".equals(request.getFileType())) {
-                PDFDataExtraction pdfExtractor = (PDFDataExtraction) factory.getExtractor("pdf");
-                String result = pdfExtractor.extractWithDownloadUrl(request.getFilePath(), request.getFileName());
+            if (file.isEmpty()) {
+                return ResponseEntity.badRequest().body("{\"error\":\"File is empty\"}");
+            }
+            
+            String tempDir = "C:\\Users\\AbhiBhuvi-PC\\Desktop\\";
+            String fileName = file.getOriginalFilename();
+            File tempFile = new File(tempDir, fileName);
+            file.transferTo(tempFile);
+            
+            DataExtraction extractor = factory.getExtractor(fileType);
+            String result = extractor.extract(tempDir, fileName);
+            
+            tempFile.delete();
+            
+            if (download) {
+            	 InetAddress inetAddress = InetAddress.getLocalHost();
+                 System.out.println("IP Address: " + inetAddress.getHostAddress());
+                String jsonFileName = fileName.replaceAll("\\.(pdf|xlsx|xls)$", "_extracted.json");
+                String downloadUrl = "http://"+inetAddress.getHostAddress()+":8081/api/extract/download/" + jsonFileName + "?filePath=" + tempDir.replace("\\", "/");
+                
+                String response = "{\"message\":\"File processed successfully\",\"downloadUrl\":\"" + downloadUrl + "\",\"fileName\":\"" + jsonFileName + "\"}";
                 
                 return ResponseEntity.ok()
                         .contentType(MediaType.APPLICATION_JSON)
-                        .body(result);
+                        .body(response);
             } else {
-                return ResponseEntity.badRequest().body("{\"error\":\"Download feature only supported for PDF files\"}");
+                return ResponseEntity.ok()
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(result);
             }
+                    
         } catch (Exception e) {
             return ResponseEntity.internalServerError().body("{\"error\":\"Failed to process file: " + e.getMessage() + "\"}");
         }
